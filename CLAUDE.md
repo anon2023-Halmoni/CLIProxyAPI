@@ -323,7 +323,7 @@ Steps 8–9 are asynchronous and invisible to the user. Nothing in the interacti
 | Hosting | Vercel | Zero-config for Next.js |
 | DB + auth | Supabase (Postgres) | Auth, realtime, cron, storage in one |
 | Queue | pg-boss / Supabase cron | Already have Postgres |
-| Model API | Anthropic API | Separate billing from the chat subscription — see §10 |
+| Model API | Z.ai GLM-5.2, thinking mode enabled | Direct API, no proxy layer. Coding-plan key → base URL `https://api.z.ai/api/coding/paas/v4` (pay-as-you-go keys use `/api/paas/v4`). OpenAI-compatible; reasoning arrives in `reasoning_content`. Client: `trainer/lib/glm.mjs`. Key in `.env` (`GLM_API_KEY`), never committed. |
 | Cards | Anki via `.apkg` export or AnkiConnect | Do not rebuild SRS |
 
 ---
