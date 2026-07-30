@@ -71,10 +71,22 @@ async function renderHome() {
 
 // ---------------------------------------------------------------- transcript
 
+// The tutor speaks markdown — render bold/italic/code in its bubbles.
+function mdToHtml(md) {
+  let t = md.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  t = t.replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  t = t.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:!?)]|$)/gm, "$1<i>$2</i>");
+  t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  t = t.replace(/^\s*[-—_]{3,}\s*$/gm, "<span class='rule'></span>");
+  return t;
+}
+
 function addMsg(role, text, meta) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
-  div.textContent = text;
+  if (role === "tutor") div.innerHTML = mdToHtml(text);
+  else div.textContent = text;
   if (meta) {
     const m = document.createElement("span");
     m.className = "meta";
@@ -141,6 +153,7 @@ async function streamPost(path, body, onDone) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let raw = "";
     let done = null;
     for (;;) {
       const { value, done: eof } = await reader.read();
@@ -153,12 +166,14 @@ async function streamPost(path, body, onDone) {
         if (!line.trim()) continue;
         const event = JSON.parse(line);
         if (event.type === "content") {
-          bubble.textContent += event.text;
+          raw += event.text;
+          bubble.innerHTML = mdToHtml(raw);
           bubble.scrollIntoView({ block: "end" });
         } else if (event.type === "done") {
           done = event;
         } else if (event.type === "error") {
-          bubble.textContent += `\n[error: ${event.message}]`;
+          raw += `\n[error: ${event.message}]`;
+          bubble.innerHTML = mdToHtml(raw);
         }
       }
     }

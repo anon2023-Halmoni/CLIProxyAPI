@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS dead_letters (
   resolved   INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS tg_chats (
+  chat_id    TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS usage (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id        TEXT,
@@ -123,6 +127,21 @@ CREATE TABLE IF NOT EXISTS usage (
   created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
 `);
+
+// Migrations for columns added after first release (ALTER fails when the
+// column exists — ignore).
+for (const col of [
+  "due_at TEXT",
+  "interval_days REAL",
+  "reps INTEGER NOT NULL DEFAULT 0",
+  "lapses INTEGER NOT NULL DEFAULT 0",
+]) {
+  try {
+    db.exec(`ALTER TABLE cards ADD COLUMN ${col}`);
+  } catch {
+    /* column already exists */
+  }
+}
 
 export const uuid = () => randomUUID();
 export const now = () => new Date().toISOString();

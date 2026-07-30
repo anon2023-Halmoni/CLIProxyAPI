@@ -41,6 +41,9 @@ while the server runs at home.
 - `/new` starts a session; reply to cases in plain text; inline buttons for
   next case / end. Commit latency is measured server-side.
 - `/brief`, `/status`, `/cards` for the background results.
+- `/review` — flashcard review **in the chat**: card front → Show answer →
+  grade 🟥 Again / 🟧 Hard / 🟩 Good / 🟦 Easy, FSRS-style scheduling.
+  The bot also pings you when a session's classification lands.
 - After your first `/start` the bot shows your chat id — set it as
   `TELEGRAM_CHAT_ID` to lock the bot to you (do this; the bot spends your
   GLM tokens).

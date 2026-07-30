@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { db, now, seedCases, enqueueJob, claimJob, completeJob, failJob } from "./lib/db.mjs";
 import { createSession, nextCase, userTurn, endSession, transcript } from "./lib/engine.mjs";
 import { processSession } from "./lib/classify.mjs";
-import { startTelegramBot } from "./lib/telegram.mjs";
+import { startTelegramBot, notifyClassified } from "./lib/telegram.mjs";
 import { transcribeAudio, transcriptionAvailable } from "./lib/transcribe.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +30,7 @@ async function runJob(job) {
   if (job.type === "classify_session") {
     const result = await processSession(job.payload.sessionId);
     console.log(`classified session ${job.payload.sessionId}:`, result);
+    await notifyClassified(job.payload.sessionId, result);
   } else {
     throw new Error(`unknown job type ${job.type}`);
   }

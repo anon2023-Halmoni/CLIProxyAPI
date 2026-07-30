@@ -12,6 +12,7 @@
 import { db } from "./db.mjs";
 import { createSession, nextCase, userTurn, endSession } from "./engine.mjs";
 import { transcribeAudio, transcriptionAvailable } from "./transcribe.mjs";
+import { dueCards, nextDueAt, getCard as getReviewCard, gradeCard, previewInterval } from "./review.mjs";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const ALLOWED_CHAT = process.env.TELEGRAM_CHAT_ID || "";
@@ -32,12 +33,40 @@ async function tg(method, params) {
   return data.result;
 }
 
+// The tutor speaks markdown; Telegram wants HTML (parse_mode). Convert
+// **bold**, *italic*, `code`, # headings and --- rules; escape the rest.
+function mdToTelegramHtml(md) {
+  let t = md
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  t = t.replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>");
+  t = t.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  t = t.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:!?)]|$)/gm, "$1<i>$2</i>");
+  t = t.replace(/`([^`\n]+)`/g, "<code>$1</code>");
+  t = t.replace(/^\s*[-—_]{3,}\s*$/gm, "━━━━━━━━━━");
+  return t;
+}
+
+// Send with HTML formatting; if Telegram rejects the entities (possible
+// mid-stream with unbalanced markers), fall back to plain text.
 async function send(chatId, text, keyboard) {
-  return tg("sendMessage", {
-    chat_id: chatId,
-    text,
-    reply_markup: keyboard ? { inline_keyboard: keyboard } : undefined,
-  });
+  const base = { chat_id: chatId, reply_markup: keyboard ? { inline_keyboard: keyboard } : undefined };
+  try {
+    return await tg("sendMessage", { ...base, text: mdToTelegramHtml(text), parse_mode: "HTML" });
+  } catch {
+    return tg("sendMessage", { ...base, text });
+  }
+}
+
+async function editMessage(chatId, messageId, text) {
+  const base = { chat_id: chatId, message_id: messageId };
+  try {
+    await tg("editMessageText", { ...base, text: mdToTelegramHtml(text), parse_mode: "HTML" });
+  } catch (e) {
+    if (/message is not modified/.test(e.message)) return;
+    await tg("editMessageText", { ...base, text });
+  }
 }
 
 const KB_AFTER_FEEDBACK = [[{ text: "Next case →", callback_data: "next" }, { text: "End session", callback_data: "end" }]];
@@ -63,15 +92,11 @@ async function streamToMessage(chatId, turnFactory) {
         const msg = await send(chatId, buffer + (final ? "" : " …"));
         messageId = msg.message_id;
       } else {
-        await tg("editMessageText", {
-          chat_id: chatId,
-          message_id: messageId,
-          text: buffer + (final ? "" : " …"),
-        });
+        await editMessage(chatId, messageId, buffer + (final ? "" : " …"));
       }
       lastEdit = Date.now();
     } catch (e) {
-      if (!/message is not modified/.test(e.message)) console.error("telegram edit:", e.message);
+      console.error("telegram edit:", e.message);
     } finally {
       editing = false;
     }
@@ -91,6 +116,30 @@ async function streamToMessage(chatId, turnFactory) {
   return result;
 }
 
+// chat -> session survives restarts via the tg_chats table.
+function bindChat(chatId, sessionId) {
+  db.prepare("INSERT OR REPLACE INTO tg_chats (chat_id, session_id) VALUES (?, ?)").run(chatId, sessionId);
+}
+
+function restoreChat(chatId) {
+  let chat = chats.get(chatId);
+  if (chat) return chat;
+  const row = db
+    .prepare(
+      `SELECT t.session_id FROM tg_chats t JOIN sessions s ON s.id = t.session_id
+       WHERE t.chat_id = ? AND s.ended_at IS NULL`,
+    )
+    .get(chatId);
+  if (!row) return null;
+  chat = { sessionId: row.session_id, clockStart: null, busy: false };
+  chats.set(chatId, chat);
+  return chat;
+}
+
+function progressBar(index, count) {
+  return "🟦".repeat(index + 1) + "⬜".repeat(Math.max(0, count - index - 1));
+}
+
 async function presentNext(chatId, chat) {
   const result = await streamToMessage(chatId, (onDelta) => nextCase(chat.sessionId, onDelta));
   if (result.finished) {
@@ -100,18 +149,37 @@ async function presentNext(chatId, chat) {
   chat.clockStart = Date.now();
   await send(
     chatId,
-    `Case ${result.caseIndex + 1}/${result.caseCount} — ⏱ ${result.timeLimitSeconds}s. One diagnosis, one immediate action. The clock is running.`,
+    `${progressBar(result.caseIndex, result.caseCount)}  **Case ${result.caseIndex + 1}/${result.caseCount}**\n⏱ **${result.timeLimitSeconds}s** — one diagnosis, one immediate action. The clock is running.`,
   );
 }
 
 async function finishSession(chatId, chat) {
   endSession(chat.sessionId);
   chats.delete(chatId);
+  // tg_chats binding is kept so the classification result can be pushed here.
   await send(
     chatId,
-    "Session ended. Classification runs in the background — /brief in a few minutes for the verdict, /cards for new Anki cards.",
+    "🏁 **Session ended.** Classification runs in the background — I'll ping you here when the verdict lands.",
     KB_START,
   );
+}
+
+/** Called by the worker when a session's classification pipeline completes. */
+export async function notifyClassified(sessionId, result) {
+  if (!TOKEN) return;
+  const row = db.prepare("SELECT chat_id FROM tg_chats WHERE session_id = ?").get(sessionId);
+  if (!row) return; // web-only session
+  const newCards = db
+    .prepare(
+      `SELECT COUNT(*) n FROM cards c JOIN misses m ON m.id = c.miss_id
+       JOIN attempts a ON a.id = m.attempt_id WHERE a.session_id = ?`,
+    )
+    .get(sessionId).n;
+  const brief = db.prepare("SELECT content FROM briefs WHERE session_id = ?").get(sessionId);
+  await send(
+    row.chat_id,
+    `🧠 **Session classified** — ${result.misses}/${result.attempts} attempts missed.${newCards ? `\n🃏 ${newCards} new card(s) — /review.` : ""}${brief ? `\n\n${brief.content}` : ""}`,
+  ).catch((e) => console.error("telegram notify:", e.message));
 }
 
 async function handleCommand(chatId, chat, text) {
@@ -120,11 +188,11 @@ async function handleCommand(chatId, chat, text) {
   if (cmd === "/start" || cmd === "/help") {
     await send(
       chatId,
-      `Clinical Reasoning Trainer.\n\nA case arrives as raw clinical material with a time limit. Reply with ONE diagnosis and ONE immediate action — your response time is measured. The tutor probes misses; answer it. Then next case.\n\n${
+      `🩺 **Clinical Reasoning Trainer**\n\nA case arrives as raw clinical material with a time limit. Reply with **one diagnosis and one immediate action** — your response time is measured. The tutor probes misses; answer it. Then next case.\n\n${
         transcriptionAvailable()
           ? "🎤 You can answer by voice note — it is transcribed and judged like a spoken viva answer."
           : "(Voice answers disabled — set GEMINI_API_KEY to enable.)"
-      }\n\nCommands:\n/new — start a session\n/end — end the current session\n/brief — latest post-session brief\n/status — mastery + due summary\n/cards — unexported card count\n\n(chat id: ${chatId})`,
+      }\n\nCommands:\n/new — start a session\n/review — 🃏 review due flashcards\n/end — end the current session\n/brief — latest post-session brief\n/status — mastery + due summary\n/cards — card counts\n\n(chat id: ${chatId})`,
       KB_START,
     );
     return;
@@ -135,6 +203,7 @@ async function handleCommand(chatId, chat, text) {
       const { sessionId } = createSession(CASES_PER_SESSION, "viva");
       const fresh = { sessionId, clockStart: null, busy: false };
       chats.set(chatId, fresh);
+      bindChat(chatId, sessionId);
       await presentNext(chatId, fresh);
     } catch (e) {
       await send(chatId, `Could not start: ${e.message}`);
@@ -148,7 +217,7 @@ async function handleCommand(chatId, chat, text) {
   }
   if (cmd === "/brief") {
     const brief = db.prepare("SELECT content, created_at FROM briefs ORDER BY created_at DESC LIMIT 1").get();
-    await send(chatId, brief ? brief.content : "No brief yet — finish a session first.");
+    await send(chatId, brief ? `🧠 **Next-session brief**\n\n${brief.content}` : "No brief yet — finish a session first.");
     return;
   }
   if (cmd === "/status") {
@@ -159,16 +228,27 @@ async function handleCommand(chatId, chat, text) {
       .prepare("SELECT concept_id, miss_type, misses, attempts FROM mastery WHERE misses > 0 ORDER BY misses DESC LIMIT 6")
       .all();
     const pending = db.prepare("SELECT COUNT(*) n FROM jobs WHERE status IN ('pending','running')").get().n;
-    const lines = worst.map((w) => `• ${w.concept_id} — ${w.miss_type.toLowerCase().replaceAll("_", " ")} (${w.misses}/${w.attempts})`);
+    const CHIP = { KNOWLEDGE_GAP: "🟨", CUE_FAILURE: "🟦", SALIENCE_FAILURE: "🟧", ANCHORING: "🟪" };
+    const lines = worst.map(
+      (w) => `${CHIP[w.miss_type] || "▫️"} \`${w.concept_id}\` — ${w.miss_type.toLowerCase().replaceAll("_", " ")} (${w.misses}/${w.attempts})`,
+    );
     await send(
       chatId,
-      `${due} concept/miss pairs due.${pending ? " Classification in progress…" : ""}\n\nWeakest:\n${lines.join("\n") || "• nothing recorded yet"}`,
+      `📊 **Status**\n${due} concept/miss pairs due.${pending ? " ⏳ Classification in progress…" : ""}\n\n**Weakest:**\n${lines.join("\n") || "▫️ nothing recorded yet"}\n\n🟨 knowledge gap · 🟦 cue failure · 🟧 salience · 🟪 anchoring`,
     );
     return;
   }
   if (cmd === "/cards") {
     const n = db.prepare("SELECT COUNT(*) n FROM cards WHERE exported_at IS NULL").get().n;
-    await send(chatId, `${n} card(s) awaiting export. Export from the web app (Push to Anki / TSV) at your server.`);
+    const due = dueCards().length;
+    await send(
+      chatId,
+      `🗂 **${due} card(s) due for review** — /review to start.\n${n} awaiting Anki export (web app: Push to Anki / TSV).`,
+    );
+    return;
+  }
+  if (cmd === "/review") {
+    await sendReviewCard(chatId);
     return;
   }
   await send(chatId, "Unknown command. /help");
@@ -192,7 +272,7 @@ async function transcribeTelegramAudio(chatId, fileId, mimeType) {
 }
 
 async function handleMessage(chatId, text, receivedAt = Date.now()) {
-  let chat = chats.get(chatId);
+  let chat = restoreChat(chatId);
 
   if (text.startsWith("/")) return handleCommand(chatId, chat, text);
 
@@ -211,7 +291,7 @@ async function handleMessage(chatId, text, receivedAt = Date.now()) {
       const overtime = limit && latencyMs > limit * 1000;
       await send(
         chatId,
-        `⏱ committed in ${(latencyMs / 1000).toFixed(1)}s${overtime ? " — over the limit" : ""}. Answer the probe, or:`,
+        `${overtime ? "🟥" : "🟩"} ⏱ committed in **${(latencyMs / 1000).toFixed(1)}s**${overtime ? " — over the limit" : ""}. Answer the probe, or:`,
         KB_AFTER_FEEDBACK,
       );
     } else {
@@ -224,9 +304,64 @@ async function handleMessage(chatId, text, receivedAt = Date.now()) {
   }
 }
 
-async function handleCallback(chatId, data, callbackId) {
+// --- flashcard review (/review) ---
+
+async function sendReviewCard(chatId) {
+  const due = dueCards();
+  if (due.length === 0) {
+    const next = nextDueAt();
+    await send(
+      chatId,
+      `✅ **No cards due.**${next ? ` Next review ${new Date(next).toLocaleString("en-AU", { hour12: false })}.` : " Cards appear here when a session uncovers a knowledge gap."}`,
+      KB_START,
+    );
+    return;
+  }
+  const card = due[0];
+  await send(chatId, `🃏 **Card** (${due.length} due)\n\n${card.front}`, [
+    [{ text: "Show answer", callback_data: `rv:s:${card.id}` }],
+  ]);
+}
+
+async function handleReviewCallback(chatId, data, messageId) {
+  const [, action, cardId, grade] = data.split(":");
+  const card = getReviewCard(cardId);
+  if (!card) return send(chatId, "Card no longer exists.");
+
+  if (action === "s") {
+    const remaining = dueCards().length;
+    await editMessage(chatId, messageId, `🃏 **Card** (${remaining} due)\n\n${card.front}\n━━━━━━━━━━\n💡 ${card.back}`);
+    await tg("editMessageReplyMarkup", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: `🟥 Again ${previewInterval(card, "again")}`, callback_data: `rv:g:${card.id}:again` },
+            { text: `🟧 Hard ${previewInterval(card, "hard")}`, callback_data: `rv:g:${card.id}:hard` },
+          ],
+          [
+            { text: `🟩 Good ${previewInterval(card, "good")}`, callback_data: `rv:g:${card.id}:good` },
+            { text: `🟦 Easy ${previewInterval(card, "easy")}`, callback_data: `rv:g:${card.id}:easy` },
+          ],
+        ],
+      },
+    }).catch((e) => console.error("review keyboard:", e.message));
+    return;
+  }
+
+  if (action === "g") {
+    const interval = gradeCard(cardId, grade);
+    await tg("editMessageReplyMarkup", { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }).catch(() => {});
+    await editMessage(chatId, messageId, `🃏 ${card.front}\n━━━━━━━━━━\n💡 ${card.back}\n\n${{ again: "🟥", hard: "🟧", good: "🟩", easy: "🟦" }[grade]} → ${interval}`);
+    await sendReviewCard(chatId);
+  }
+}
+
+async function handleCallback(chatId, data, callbackId, messageId) {
   await tg("answerCallbackQuery", { callback_query_id: callbackId }).catch(() => {});
-  let chat = chats.get(chatId);
+  if (data.startsWith("rv:")) return handleReviewCallback(chatId, data, messageId);
+  let chat = restoreChat(chatId);
   if (data === "new") return handleCommand(chatId, chat, "/new");
   if (!chat?.sessionId) return send(chatId, "No session running. /new to start.", KB_START);
   if (chat.busy) return;
@@ -288,7 +423,7 @@ export function startTelegramBot() {
                 await send(chatId, `🎤 "${transcript}"`);
                 await handleMessage(chatId, transcript, receivedAt);
               }
-            } else if (cb) await handleCallback(chatId, cb.data, cb.id);
+            } else if (cb) await handleCallback(chatId, cb.data, cb.id, cb.message?.message_id);
           } catch (e) {
             console.error("telegram update failed:", e);
           }

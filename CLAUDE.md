@@ -327,7 +327,7 @@ Steps 8–9 are asynchronous and invisible to the user. Nothing in the interacti
 | Queue | `jobs` table + in-process worker, retries + dead-letter table | pg-boss | Same semantics at 1-user volume |
 | Model API | Z.ai GLM-5.2, split by path: tutor = thinking OFF (~1.0s TTFT vs 2.5s, benchmarked 2026-07-30 across all 8 Z.ai models; glm-4.x with thinking are unusable interactively at 14–44s TTFT); background classifier/cards = thinking ON | Anthropic API | Direct API, no proxy layer. Coding-plan key → base URL `https://api.z.ai/api/coding/paas/v4` (pay-as-you-go keys use `/api/paas/v4`). OpenAI-compatible; reasoning arrives in `reasoning_content`. Client: `trainer/lib/glm.mjs`. Key in `.env` (`GLM_API_KEY`), never committed. |
 | Scheduling | Deterministic interval replay (grow ×2.5 on clean, shrink ×0.25 on miss, per (concept, miss_type)) | FSRS proper | Same shape (deterministic, SQL-driven); swap in real FSRS weights later without schema change |
-| Cards | Anki via AnkiConnect push or TSV export | `.apkg` | AnkiConnect is one HTTP call; TSV imports natively |
+| Cards | In-chat Telegram review (`/review`, FSRS-style scheduler in `trainer/lib/review.mjs`) **plus** Anki via AnkiConnect push or TSV export | Anki only ("don't rebuild SRS") | Owner decision 2026-07-30: reviewing where the training happens beats switching apps; scheduler is ~60 lines, deterministic, and Anki export remains for the existing deck |
 
 ---
 
