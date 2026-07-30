@@ -317,14 +317,17 @@ Steps 8–9 are asynchronous and invisible to the user. Nothing in the interacti
 
 ## 9. Stack
 
-| Layer | Choice | Rationale |
-|---|---|---|
-| Client | PWA — Next.js, installs to home screen | One codebase, no store, no Kotlin, works on Android and desktop |
-| Hosting | Vercel | Zero-config for Next.js |
-| DB + auth | Supabase (Postgres) | Auth, realtime, cron, storage in one |
-| Queue | pg-boss / Supabase cron | Already have Postgres |
-| Model API | Z.ai GLM-5.2, thinking mode enabled | Direct API, no proxy layer. Coding-plan key → base URL `https://api.z.ai/api/coding/paas/v4` (pay-as-you-go keys use `/api/paas/v4`). OpenAI-compatible; reasoning arrives in `reasoning_content`. Client: `trainer/lib/glm.mjs`. Key in `.env` (`GLM_API_KEY`), never committed. |
-| Cards | Anki via `.apkg` export or AnkiConnect | Do not rebuild SRS |
+**As built (v1, 2026-07-30).** The Supabase/Vercel/Next.js column was the original plan; v1 ships as a self-hosted, zero-dependency Node server so the product works with one command and no accounts. The architecture (event sourcing, queue, projections) is unchanged; only the hosting substrate moved. Revisit when multi-device sync is actually needed.
+
+| Layer | v1 choice (as built) | Original plan (deferred) | Rationale for v1 |
+|---|---|---|---|
+| Client | Vanilla-JS PWA served by the app server, installs to home screen | Next.js on Vercel | No build step, no framework; ~500 lines total |
+| Server | Single Node ≥22 process (`trainer/server.mjs`) | Vercel functions | One command to run; streams NDJSON |
+| DB | SQLite via built-in `node:sqlite` (`trainer/data/trainer.db`) | Supabase Postgres | Zero setup; same schema shape, migratable later |
+| Queue | `jobs` table + in-process worker, retries + dead-letter table | pg-boss | Same semantics at 1-user volume |
+| Model API | Z.ai GLM-5.2, thinking mode enabled | Anthropic API | Direct API, no proxy layer. Coding-plan key → base URL `https://api.z.ai/api/coding/paas/v4` (pay-as-you-go keys use `/api/paas/v4`). OpenAI-compatible; reasoning arrives in `reasoning_content`. Client: `trainer/lib/glm.mjs`. Key in `.env` (`GLM_API_KEY`), never committed. |
+| Scheduling | Deterministic interval replay (grow ×2.5 on clean, shrink ×0.25 on miss, per (concept, miss_type)) | FSRS proper | Same shape (deterministic, SQL-driven); swap in real FSRS weights later without schema change |
+| Cards | Anki via AnkiConnect push or TSV export | `.apkg` | AnkiConnect is one HTTP call; TSV imports natively |
 
 ---
 
@@ -349,15 +352,15 @@ Steps 8–9 are asynchronous and invisible to the user. Nothing in the interacti
 
 Ship each milestone working before starting the next. Resist building the four-agent version first.
 
-| M | Deliverable | Done when |
-|---|---|---|
-| **M0** | Repo, `CLAUDE.md`, Supabase project, `.env`, spend cap set | `git log` has a first commit; secrets are not in it |
-| **M1** | One hardcoded case, tutor streams it, answer stored in `events` | A full turn survives a page refresh |
-| **M2** | Classifier runs at session end, writes one valid `misses` row | JSON validates; bad output dead-letters instead of crashing |
-| **M3** | `mastery` projection + `reclassify` command | Changing the classifier prompt and replaying changes the mastery table |
-| **M4** | Case selection driven by mastery + remediation mapping | A `CUE_FAILURE` produces a surface-varied re-presentation |
-| **M5** | Card generation → Anki export | Cards land in the existing deck without duplicates |
-| **M6** | Auth, PWA manifest, install to home screen | Runs from the phone home screen |
+| M | Deliverable | Done when | Status (2026-07-30) |
+|---|---|---|---|
+| **M0** | Repo, `CLAUDE.md`, `.env`, spend cap set | `git log` has a first commit; secrets are not in it | ✅ (SQLite instead of Supabase; no cap needed on coding-plan billing) |
+| **M1** | Cases, tutor streams them, answers stored in `events` | A full turn survives a page refresh | ✅ verified — survives full server restart, not just refresh |
+| **M2** | Classifier runs at session end, writes valid `misses` rows | JSON validates; bad output dead-letters instead of crashing | ✅ verified — validation + retry + dead-letter table |
+| **M3** | `mastery` projection + `reclassify` command | Changing the classifier prompt and replaying changes the mastery table | ✅ `trainer/reclassify.mjs <id> \| --all \| --rebuild-mastery` |
+| **M4** | Case selection driven by mastery + remediation mapping | A `CUE_FAILURE` produces a surface-varied re-presentation | ✅ verified — due `ANCHORING` selected its case with contrastive directive |
+| **M5** | Card generation → Anki export | Cards land in the existing deck without duplicates | ✅ `KNOWLEDGE_GAP` → card, content-hash dedupe, AnkiConnect + TSV (AnkiConnect path untested — needs Anki running) |
+| **M6** | Auth, PWA manifest, install to home screen | Runs from the phone home screen | ✅ manifest + service worker + optional `TRAINER_KEY`; install untested on a real phone |
 
 Everything before M3 is throwaway scaffolding. Build it ugly and hardcoded.
 

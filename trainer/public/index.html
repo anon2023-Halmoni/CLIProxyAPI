@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#10151d">
+<title>Clinical Reasoning Trainer</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+
+  <section id="home" class="view">
+    <header class="masthead">
+      <h1>Clinical Reasoning Trainer</h1>
+      <p class="sub">Label-free. Timed. Committed answers only.</p>
+    </header>
+
+    <div id="brief-box" class="card hidden">
+      <h2>Next-session brief</h2>
+      <p id="brief-text"></p>
+    </div>
+
+    <div class="card">
+      <button id="start-btn" class="primary big">Start session</button>
+      <p class="hint" id="home-status"></p>
+    </div>
+
+    <div class="card">
+      <h2>Mastery</h2>
+      <div id="due-summary" class="hint"></div>
+      <table id="mastery-table"><thead>
+        <tr><th>Concept</th><th>Miss type</th><th>Miss / att</th><th>Due</th></tr>
+      </thead><tbody></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>Cards</h2>
+      <p class="hint"><span id="cards-count">0</span> generated, <span id="cards-unexported">0</span> awaiting export</p>
+      <div class="row">
+        <button id="anki-push">Push to Anki</button>
+        <a id="tsv-link" href="#" download>Download TSV</a>
+      </div>
+      <p class="hint" id="anki-status"></p>
+    </div>
+
+    <div id="deadletter-box" class="card warn hidden">
+      <p>⚠ <span id="deadletter-count"></span> classification job(s) dead-lettered — check server logs.</p>
+    </div>
+
+    <p class="hint footer">Exam preparation only — not clinical decision support. Generated thresholds are unverified until reviewed.</p>
+  </section>
+
+  <section id="session" class="view hidden">
+    <header class="session-bar">
+      <span id="case-progress"></span>
+      <div id="timer" class="timer hidden"><div id="timer-fill"></div><span id="timer-text"></span></div>
+      <button id="end-btn" class="danger small">End session</button>
+    </header>
+
+    <main id="transcript"></main>
+
+    <footer class="composer">
+      <textarea id="input" rows="2" placeholder="One diagnosis. One immediate action." autocomplete="off"></textarea>
+      <div class="composer-buttons">
+        <button id="send-btn" class="primary">Commit</button>
+        <button id="next-btn" class="hidden">Next case →</button>
+      </div>
+    </footer>
+  </section>
+
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

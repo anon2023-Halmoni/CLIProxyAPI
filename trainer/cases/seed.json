@@ -1,0 +1,127 @@
+[
+  {
+    "id": "case-postop-sepsis",
+    "stem": "Ward nurse phones at 0140: 'Mr Okafor, 58, day one post laparoscopic cholecystectomy. He's not looking right. I did obs because he asked for another blanket.' Obs: HR 118, BP 96/58, RR 26, temp 38.4, SpO2 97% RA. Urine output 20 mL over the past 2 hours. Orientated, flushed, shivering. A 500 mL bolus an hour ago; BP beforehand 102/60.",
+    "obs": { "HR": 118, "BP": "96/58", "RR": 26, "temp": 38.4, "SpO2": "97% RA", "urine_output_2h_mL": 20 },
+    "correct_dx": "Sepsis (likely intra-abdominal source, post-operative) with hypotension — early septic shock",
+    "correct_action": "Immediate senior review / MET call per local criteria; blood cultures then broad-spectrum IV antibiotics within the hour; further IV fluid resuscitation; lactate; escalate — do not observe overnight",
+    "discriminators": [
+      "Hypotension NOT responding to fluid bolus distinguishes evolving septic shock from simple post-op SIRS",
+      "Oliguria (20 mL/2h) marks organ hypoperfusion — this is not 'a bit dry'",
+      "RR 26 is the earliest deranged parameter and must be named"
+    ],
+    "near_misses": ["Post-operative atelectasis with fever", "Hypovolaemia from poor intake", "Normal post-op inflammatory response"],
+    "concept_ids": ["sepsis.recognition.postop", "sepsis.escalation.timing", "shock.fluid-refractory-hypotension"],
+    "time_limit_s": 180,
+    "provenance": "generated"
+  },
+  {
+    "id": "case-pe-postop",
+    "stem": "You are called to see Ms Tran, 44, day three after total abdominal hysterectomy. She stood up to walk to the bathroom and 'went grey and dizzy'. Now back in bed. HR 112, BP 108/70, RR 24, SpO2 93% RA (was 98% yesterday), temp 37.2. Chest clear. Calves soft, no swelling noted. She feels 'a bit tight' centrally but says it's probably wind.",
+    "obs": { "HR": 112, "BP": "108/70", "RR": 24, "SpO2": "93% RA", "temp": 37.2 },
+    "correct_dx": "Pulmonary embolism (post-operative)",
+    "correct_action": "Escalate for urgent assessment: ECG, ABG, and CTPA (or V/Q); apply oxygen; do not attribute to anxiety or 'wind'; anticoagulation decision urgently with senior — weighing recent surgery",
+    "discriminators": [
+      "Exertional syncope/presyncope plus new hypoxia post-op is PE until proven otherwise",
+      "Clear chest with hypoxia points away from atelectasis/pneumonia",
+      "Absence of leg signs does not exclude DVT/PE"
+    ],
+    "near_misses": ["Atelectasis", "Anxiety/panic attack", "Vasovagal episode on standing"],
+    "concept_ids": ["pe.recognition.postop-hypoxia", "pe.discriminator.clear-chest-hypoxia", "pe.escalation.ctpa"],
+    "time_limit_s": 180,
+    "provenance": "generated"
+  },
+  {
+    "id": "case-hypoglycaemia-stroke-mimic",
+    "stem": "ED handover, 0630: 'Bed 9, Mrs Papadopoulos, 74, brought in with right-sided weakness and slurred speech noticed by her husband when she woke. Onset unknown — last seen well 2200. Past history: type 2 diabetes on gliclazide, hypertension. Obs stable: HR 82, BP 158/92, RR 16, afebrile, SpO2 98%. Stroke team not yet called — she's next on your list.'",
+    "obs": { "HR": 82, "BP": "158/92", "RR": 16, "SpO2": "98%" },
+    "correct_dx": "Hypoglycaemia (sulfonylurea) presenting as a stroke mimic — must be excluded before stroke pathway",
+    "correct_action": "Immediate bedside blood glucose before anything else; if low, treat with IV glucose and recheck neurology; only then activate stroke pathway if deficit persists",
+    "discriminators": [
+      "BGL is the mandatory first test in any acute focal neurology — especially on a sulfonylurea",
+      "Wake-up deficit with unknown onset changes thrombolysis eligibility but not the need for BGL first"
+    ],
+    "near_misses": ["Ischaemic stroke", "Todd's paresis", "Bell's palsy"],
+    "concept_ids": ["hypoglycaemia.stroke-mimic", "neuro.first-test.bgl", "hypoglycaemia.sulfonylurea-risk"],
+    "time_limit_s": 120,
+    "provenance": "generated"
+  },
+  {
+    "id": "case-anaphylaxis-biphasic",
+    "stem": "GP registrar phones from the treatment room: 'I've got Jake, 21, here for a knee wash-out follow-up. About ten minutes after his first dose of oral cephalexin in the waiting room he got itchy palms, then widespread hives. Now he says his tongue feels thick and he's coughing. He looks anxious. HR 122, BP 104/66, RR 22, SpO2 96%. I've given loratadine. Should I watch him?'",
+    "obs": { "HR": 122, "BP": "104/66", "RR": 22, "SpO2": "96%" },
+    "correct_dx": "Anaphylaxis (drug-induced)",
+    "correct_action": "IM adrenaline 500 microg (0.5 mL of 1:1000) into lateral thigh immediately — antihistamine is not treatment; lay flat, call ambulance, oxygen, IV access, repeat adrenaline at 5 min if needed; observe for biphasic reaction",
+    "discriminators": [
+      "Mucosal swelling plus respiratory symptoms after allergen = anaphylaxis — hives alone would not be",
+      "Antihistamines treat urticaria only; adrenaline is the only disease-modifying treatment",
+      "Timing: IM adrenaline now, not after further observation"
+    ],
+    "near_misses": ["Simple urticaria", "Panic attack with hyperventilation", "Cephalexin intolerance (GI)"],
+    "concept_ids": ["anaphylaxis.recognition.mucosal-respiratory", "anaphylaxis.adrenaline-first", "anaphylaxis.biphasic-observation"],
+    "time_limit_s": 120,
+    "provenance": "generated"
+  },
+  {
+    "id": "case-stemi-atypical",
+    "stem": "Practice nurse interrupts your consult: 'Mrs Nguyen, 68, diabetic, walked in saying she's felt \"washed out\" and nauseated since breakfast, with some heaviness between her shoulder blades. She vomited once. She looks pale and sweaty. HR 92, BP 138/84, RR 18, SpO2 97%. I've put her in the spare room.'",
+    "obs": { "HR": 92, "BP": "138/84", "RR": 18, "SpO2": "97%" },
+    "correct_dx": "Acute coronary syndrome — likely STEMI/NSTEMI with atypical (diabetic) presentation",
+    "correct_action": "Immediate 12-lead ECG (within 10 minutes), aspirin 300 mg, call ambulance for transfer to PCI-capable centre; do not send home or trial antacids",
+    "discriminators": [
+      "Diabetic + female + nausea/diaphoresis: ACS frequently presents without chest pain",
+      "Interscapular heaviness plus autonomic features is an anginal equivalent",
+      "The ECG is the discriminating test and has a 10-minute target"
+    ],
+    "near_misses": ["Gastroenteritis", "GORD/dyspepsia", "Musculoskeletal back pain"],
+    "concept_ids": ["acs.atypical.diabetic", "acs.ecg-10min", "acs.disposition.pci"],
+    "time_limit_s": 150,
+    "provenance": "generated"
+  },
+  {
+    "id": "case-dka-abdo",
+    "stem": "ED triage note: 'Liam, 19, abdominal pain and vomiting since yesterday, could not keep water down. Looks unwell, breath smells odd. HR 124, BP 102/64, RR 28 deep and sighing, temp 37.1, SpO2 99%. Triage BGL flagged HI on the meter.'",
+    "obs": { "HR": 124, "BP": "102/64", "RR": 28, "temp": 37.1, "SpO2": "99%", "BGL": "HI" },
+    "correct_dx": "Diabetic ketoacidosis (possibly first presentation of type 1 diabetes)",
+    "correct_action": "IV access, VBG with ketones and electrolytes, start IV 0.9% saline resuscitation, then insulin infusion per protocol once potassium known; do not work up as surgical abdomen first; escalate early",
+    "discriminators": [
+      "Kussmaul breathing (deep, sighing, RR 28) with normal SpO2 is metabolic acidosis, not a respiratory problem",
+      "HI glucose + vomiting + abdominal pain: the abdominal pain is a symptom of DKA, not necessarily its cause",
+      "Potassium before insulin is the classic sequencing trap"
+    ],
+    "near_misses": ["Appendicitis/surgical abdomen", "Gastroenteritis with dehydration", "Hyperventilation/anxiety"],
+    "concept_ids": ["dka.recognition.kussmaul", "dka.abdo-pain-trap", "dka.potassium-before-insulin"],
+    "time_limit_s": 180,
+    "provenance": "generated"
+  },
+  {
+    "id": "case-tension-pneumothorax",
+    "stem": "You are first to a MET call in the radiology corridor. Mr Sialei, 31, tall and thin, collapsed while walking back from a chest X-ray ordered for 'sudden pleuritic pain'. He is gasping, distressed, trachea feels deviated to the left, right chest silent to your ear, neck veins full. HR 138, BP 82/50, RR 36, SpO2 84% on 15L NRB just applied.",
+    "obs": { "HR": 138, "BP": "82/50", "RR": 36, "SpO2": "84% on 15L" },
+    "correct_dx": "Tension pneumothorax (right)",
+    "correct_action": "Immediate needle decompression / finger thoracostomy of the right chest NOW — before any imaging or waiting for the X-ray already taken; then intercostal catheter",
+    "discriminators": [
+      "Obstructive shock + unilateral silent chest + tracheal deviation = clinical diagnosis; imaging must not delay decompression",
+      "The already-ordered X-ray is a trap — treatment precedes confirmation"
+    ],
+    "near_misses": ["Simple pneumothorax", "Massive PE", "Acute severe asthma"],
+    "concept_ids": ["pneumothorax.tension.clinical-dx", "pneumothorax.decompress-before-imaging", "shock.obstructive.recognition"],
+    "time_limit_s": 90,
+    "provenance": "generated"
+  },
+  {
+    "id": "case-hyperkalaemia",
+    "stem": "Night ward round. Covering resident hands you a VBG from Mrs Deng, 81, admitted with a UTI, background CKD stage 4 on spironolactone and an ACE inhibitor, poor oral intake for two days. She 'feels a bit weak in the legs'. VBG: pH 7.31, K+ 7.1, creatinine up from baseline. Obs: HR 54, BP 118/70, RR 16, afebrile. The resident asks whether to just repeat it in the morning.",
+    "obs": { "HR": 54, "BP": "118/70", "RR": 16, "K": 7.1, "pH": 7.31 },
+    "correct_dx": "Severe hyperkalaemia with bradycardia (AKI on CKD, drug-precipitated)",
+    "correct_action": "Do not wait: continuous cardiac monitoring and urgent 12-lead ECG; IV calcium gluconate for membrane stabilisation if ECG changes or K ≥ 6.5; insulin-dextrose; cease spironolactone and ACE inhibitor; escalate to registrar/ICU",
+    "discriminators": [
+      "K 7.1 with bradycardia and weakness is an emergency regardless of how well she looks — 'repeat in the morning' is the fatal option",
+      "Calcium first (membrane stabilisation) is the sequencing discriminator, then shifting agents"
+    ],
+    "near_misses": ["Pseudohyperkalaemia (haemolysed sample)", "Simple AKI monitoring overnight", "UTI-related fatigue"],
+    "concept_ids": ["hyperkalaemia.threshold-emergency", "hyperkalaemia.calcium-first", "aki.drug-precipitants"],
+    "time_limit_s": 150,
+    "provenance": "generated"
+  }
+]

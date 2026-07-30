@@ -46,6 +46,9 @@ GEMINI.md
 _bmad/*
 _bmad-output/*
 
+# Trainer local data (SQLite, WAL)
+trainer/data/
+
 # macOS
 .DS_Store
 ._*

@@ -1,0 +1,12 @@
+{
+  "name": "Clinical Reasoning Trainer",
+  "short_name": "Trainer",
+  "description": "Label-free, timed, action-forcing clinical case training",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#10151d",
+  "theme_color": "#10151d",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
