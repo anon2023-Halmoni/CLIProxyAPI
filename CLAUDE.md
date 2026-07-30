@@ -321,11 +321,11 @@ Steps 8–9 are asynchronous and invisible to the user. Nothing in the interacti
 
 | Layer | v1 choice (as built) | Original plan (deferred) | Rationale for v1 |
 |---|---|---|---|
-| Client | Vanilla-JS PWA served by the app server, installs to home screen | Next.js on Vercel | No build step, no framework; ~500 lines total |
+| Client | Vanilla-JS PWA served by the app server, installs to home screen; plus a Telegram bot (`trainer/lib/telegram.mjs`, long-polling — no public URL needed) sharing the same session engine (`trainer/lib/engine.mjs`). Telegram Mini App deferred: it needs a public HTTPS URL (`TRAINER_PUBLIC_URL` enables the bot menu button when one exists). | Next.js on Vercel | No build step, no framework; bot reaches the phone anywhere with zero hosting |
 | Server | Single Node ≥22 process (`trainer/server.mjs`) | Vercel functions | One command to run; streams NDJSON |
 | DB | SQLite via built-in `node:sqlite` (`trainer/data/trainer.db`) | Supabase Postgres | Zero setup; same schema shape, migratable later |
 | Queue | `jobs` table + in-process worker, retries + dead-letter table | pg-boss | Same semantics at 1-user volume |
-| Model API | Z.ai GLM-5.2, thinking mode enabled | Anthropic API | Direct API, no proxy layer. Coding-plan key → base URL `https://api.z.ai/api/coding/paas/v4` (pay-as-you-go keys use `/api/paas/v4`). OpenAI-compatible; reasoning arrives in `reasoning_content`. Client: `trainer/lib/glm.mjs`. Key in `.env` (`GLM_API_KEY`), never committed. |
+| Model API | Z.ai GLM-5.2, split by path: tutor = thinking OFF (~1.0s TTFT vs 2.5s, benchmarked 2026-07-30 across all 8 Z.ai models; glm-4.x with thinking are unusable interactively at 14–44s TTFT); background classifier/cards = thinking ON | Anthropic API | Direct API, no proxy layer. Coding-plan key → base URL `https://api.z.ai/api/coding/paas/v4` (pay-as-you-go keys use `/api/paas/v4`). OpenAI-compatible; reasoning arrives in `reasoning_content`. Client: `trainer/lib/glm.mjs`. Key in `.env` (`GLM_API_KEY`), never committed. |
 | Scheduling | Deterministic interval replay (grow ×2.5 on clean, shrink ×0.25 on miss, per (concept, miss_type)) | FSRS proper | Same shape (deterministic, SQL-driven); swap in real FSRS weights later without schema change |
 | Cards | Anki via AnkiConnect push or TSV export | `.apkg` | AnkiConnect is one HTTP call; TSV imports natively |
 

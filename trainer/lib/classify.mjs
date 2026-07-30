@@ -13,6 +13,10 @@ import {
   BRIEFER_SYSTEM_PROMPT,
 } from "./prompts.mjs";
 
+// Background work is latency-insensitive: use the strongest model with
+// thinking ON (the tutor path runs thinking-off for time-to-first-token).
+const HEAVY_MODEL = process.env.GLM_HEAVY_MODEL || "glm-5.2";
+
 const MISS_TYPES = ["KNOWLEDGE_GAP", "CUE_FAILURE", "SALIENCE_FAILURE", "ANCHORING"];
 const REMEDIATIONS = {
   KNOWLEDGE_GAP: "GENERATE_CARD",
@@ -54,7 +58,7 @@ async function classifyAttempt(sessionId, attempt, caseRow, transcript) {
   ];
 
   for (let round = 0; round < 2; round++) {
-    const { content, usage, raw } = await chat(messages, { maxTokens: 2048 });
+    const { content, usage, raw } = await chat(messages, { model: HEAVY_MODEL, thinking: true, maxTokens: 2048 });
     recordUsage(sessionId, "classifier", raw?.model, usage);
     let parsed, errors;
     try {
@@ -186,7 +190,7 @@ async function writeCards(sessionId) {
           }),
         },
       ],
-      { maxTokens: 1024 },
+      { model: HEAVY_MODEL, thinking: true, maxTokens: 1024 },
     );
     recordUsage(sessionId, "card_writer", raw?.model, usage);
     let card;
@@ -228,7 +232,7 @@ async function writeBrief(sessionId) {
       { role: "system", content: BRIEFER_SYSTEM_PROMPT },
       { role: "user", content: JSON.stringify({ session_misses: misses, upcoming_due: due }) },
     ],
-    { maxTokens: 1024, thinking: false },
+    { model: HEAVY_MODEL, maxTokens: 1024, thinking: false },
   );
   recordUsage(sessionId, "briefer", raw?.model, usage);
   db.prepare(

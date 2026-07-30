@@ -31,6 +31,32 @@ runs on Node ≥ 22.
   deck name via `ANKI_DECK`, default "Clinical Reasoning") or **Download
   TSV** and import manually (File → Import, fields separated by tabs).
 
+## Telegram bot
+
+Message [@BotFather](https://t.me/BotFather), `/newbot`, and put the token
+in `trainer/.env` as `TELEGRAM_BOT_TOKEN`. Restart the server — it long-polls
+Telegram, so it needs **no public URL** and works from your phone anywhere
+while the server runs at home.
+
+- `/new` starts a session; reply to cases in plain text; inline buttons for
+  next case / end. Commit latency is measured server-side.
+- `/brief`, `/status`, `/cards` for the background results.
+- After your first `/start` the bot shows your chat id — set it as
+  `TELEGRAM_CHAT_ID` to lock the bot to you (do this; the bot spends your
+  GLM tokens).
+- Only ONE server may poll a bot token at a time.
+- If you later give the server a public HTTPS URL (`TRAINER_PUBLIC_URL`,
+  e.g. a Cloudflare tunnel), the bot's menu button opens the full web app
+  as a Telegram Mini App.
+
+## Model split
+
+Benchmarked across all Z.ai models (2026-07-30): the tutor runs
+`glm-5.2` with thinking **off** (~1s to first token, fastest total stream);
+the background classifier/cards run `glm-5.2` with thinking **on**
+(quality matters, nobody is waiting). Override with `GLM_TUTOR_MODEL`,
+`GLM_TUTOR_THINKING=on|off`, `GLM_HEAVY_MODEL`.
+
 ## Commands
 
 | Command | Purpose |

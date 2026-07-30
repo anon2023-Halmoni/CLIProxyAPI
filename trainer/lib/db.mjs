@@ -169,7 +169,7 @@ export function recordUsage(sessionId, kind, model, usage) {
 
 export function seedCases() {
   const { n } = db.prepare("SELECT COUNT(*) AS n FROM cases").get();
-  if (n > 0) return n;
+  if (n > 0) return 0; // already seeded
   const seed = JSON.parse(readFileSync(resolve(here, "..", "cases", "seed.json"), "utf8"));
   const ins = db.prepare(
     `INSERT INTO cases (id, stem, obs, correct_dx, correct_action, discriminators, near_misses, concept_ids, time_limit_s, provenance)

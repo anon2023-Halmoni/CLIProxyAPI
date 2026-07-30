@@ -1,33 +1,19 @@
 // Clinical Reasoning Trainer — single-process server.
 //   node trainer/server.mjs        (default port 8787)
 //
-// Serves the PWA, exposes the session API, streams tutor turns as
-// NDJSON, and runs the background job worker in-process. The events
-// table is canonical; the interactive path never waits on
-// classification (spec §7).
+// Serves the PWA, exposes the session API (NDJSON streaming), runs the
+// background job worker, and — when TELEGRAM_BOT_TOKEN is set — the
+// Telegram bot. The events table is canonical; the interactive path
+// never waits on classification (spec §7).
 
 import http from "node:http";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  db,
-  uuid,
-  now,
-  appendEvent,
-  sessionEvents,
-  seedCases,
-  getCase,
-  enqueueJob,
-  claimJob,
-  completeJob,
-  failJob,
-  recordUsage,
-} from "./lib/db.mjs";
-import { streamChat } from "./lib/glm.mjs";
-import { TUTOR_SYSTEM_PROMPT, caseFileMessage } from "./lib/prompts.mjs";
-import { selectCases } from "./lib/select.mjs";
+import { db, now, seedCases, enqueueJob, claimJob, completeJob, failJob } from "./lib/db.mjs";
+import { createSession, nextCase, userTurn, endSession, transcript } from "./lib/engine.mjs";
 import { processSession } from "./lib/classify.mjs";
+import { startTelegramBot } from "./lib/telegram.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.TRAINER_PORT || 8787);
@@ -36,42 +22,6 @@ const CASES_PER_SESSION = Number(process.env.TRAINER_CASES_PER_SESSION || 4);
 
 const seeded = seedCases();
 if (seeded) console.log(`seeded ${seeded} cases`);
-
-// ---------------------------------------------------------------- sessions
-// In-memory live state, rebuildable from events (event sourcing).
-
-const live = new Map(); // sessionId -> {messages, plan, idx, answered, presentedAt}
-
-function requireLive(sessionId) {
-  if (live.has(sessionId)) return live.get(sessionId);
-  // Rebuild from events after a restart.
-  const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId);
-  if (!session || session.ended_at) return null;
-  const events = sessionEvents(sessionId);
-  const planEvent = events.find((e) => e.type === "session_started");
-  if (!planEvent) return null;
-  const plan = planEvent.payload.plan.map((p) => ({
-    ...p,
-    case: getCase(p.caseId),
-  }));
-  const state = { messages: [{ role: "system", content: TUTOR_SYSTEM_PROMPT }], plan, idx: -1, answered: false, presentedAt: null };
-  for (const e of events) {
-    if (e.type === "case_presented") {
-      const p = plan.find((x) => x.caseId === e.payload.case_id);
-      state.idx = plan.indexOf(p);
-      state.answered = false;
-      state.messages.push({ role: "user", content: caseFileMessage(p.case, p.directive, p.timeLimitSeconds) });
-      state.messages.push({ role: "assistant", content: e.payload.text });
-    }
-    if (e.type === "answer_submitted" || e.type === "probe_answered") {
-      if (e.type === "answer_submitted") state.answered = true;
-      state.messages.push({ role: "user", content: e.payload.text + (e.payload.latency_ms ? `\n\n[response latency: ${(e.payload.latency_ms / 1000).toFixed(1)}s]` : "") });
-    }
-    if (e.type === "feedback_given") state.messages.push({ role: "assistant", content: e.payload.text });
-  }
-  live.set(sessionId, state);
-  return state;
-}
 
 // ---------------------------------------------------------------- worker
 
@@ -114,50 +64,29 @@ async function readBody(req) {
   return body ? JSON.parse(body) : {};
 }
 
-function ndjsonStart(res) {
+async function streamTurn(res, turnPromiseFactory) {
   res.writeHead(200, { "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache" });
-}
-
-async function streamTutorTurn(res, sessionId, state, kind) {
-  ndjsonStart(res);
-  let full = "";
   try {
-    const { content, usage } = await streamChat(state.messages, {
-      maxTokens: 3072,
-      onDelta: ({ type, text }) => {
-        if (type === "content") res.write(JSON.stringify({ type: "content", text }) + "\n");
-      },
-    });
-    full = content;
-    recordUsage(sessionId, "tutor", process.env.GLM_MODEL || "glm-5.2", usage);
+    const result = await turnPromiseFactory((text) =>
+      res.write(JSON.stringify({ type: "content", text }) + "\n"),
+    );
+    if (result.finished) {
+      res.write(JSON.stringify({ type: "done", finished: true }) + "\n");
+    } else {
+      res.write(
+        JSON.stringify({
+          type: "done",
+          kind: result.kind,
+          caseIndex: result.caseIndex,
+          caseCount: result.caseCount,
+          timeLimitSeconds: result.timeLimitSeconds,
+        }) + "\n",
+      );
+    }
   } catch (e) {
     res.write(JSON.stringify({ type: "error", message: String(e.message) }) + "\n");
-    res.end();
-    return null;
   }
-  state.messages.push({ role: "assistant", content: full });
-  const current = state.plan[state.idx];
-  appendEvent(sessionId, kind, { case_id: current?.caseId ?? null, text: full });
-  res.write(
-    JSON.stringify({
-      type: "done",
-      kind,
-      caseIndex: state.idx,
-      caseCount: state.plan.length,
-      timeLimitSeconds: current?.timeLimitSeconds ?? null,
-    }) + "\n",
-  );
   res.end();
-  return full;
-}
-
-function presentNextCase(state) {
-  state.idx += 1;
-  state.answered = false;
-  if (state.idx >= state.plan.length) return false;
-  const p = state.plan[state.idx];
-  state.messages.push({ role: "user", content: caseFileMessage(p.case, p.directive, p.timeLimitSeconds) });
-  return true;
 }
 
 // ---------------------------------------------------------------- routes
@@ -167,88 +96,32 @@ async function handleApi(req, res, url) {
 
   if (path === "/api/session/start" && req.method === "POST") {
     const body = await readBody(req);
-    const selections = selectCases(Number(body.cases) || CASES_PER_SESSION);
-    if (selections.length === 0) return json(res, 500, { error: "no cases available" });
-    const sessionId = uuid();
-    db.prepare("INSERT INTO sessions (id, started_at, mode) VALUES (?, ?, ?)").run(sessionId, now(), body.mode || "viva");
-    const plan = selections.map((s) => ({
-      caseId: s.case.id,
-      missType: s.missType,
-      directive: s.directive,
-      timeLimitSeconds: s.timeLimitSeconds,
-    }));
-    appendEvent(sessionId, "session_started", { plan, mode: body.mode || "viva" });
-    live.set(sessionId, {
-      messages: [{ role: "system", content: TUTOR_SYSTEM_PROMPT }],
-      plan: plan.map((p, i) => ({ ...p, case: selections[i].case })),
-      idx: -1,
-      answered: false,
-    });
-    return json(res, 200, { sessionId, caseCount: plan.length });
+    try {
+      const { sessionId, caseCount } = createSession(Number(body.cases) || CASES_PER_SESSION, body.mode || "viva");
+      return json(res, 200, { sessionId, caseCount });
+    } catch (e) {
+      return json(res, 500, { error: e.message });
+    }
   }
 
-  const turnMatch = path.match(/^\/api\/session\/([0-9a-f-]+)\/(turn|next|end|transcript)$/);
-  if (turnMatch) {
-    const [, sessionId, action] = turnMatch;
-    const state = requireLive(sessionId);
+  const m = path.match(/^\/api\/session\/([0-9a-f-]+)\/(turn|next|end|transcript)$/);
+  if (m) {
+    const [, sessionId, action] = m;
 
-    if (action === "transcript" && req.method === "GET") {
-      const events = sessionEvents(sessionId).filter((e) =>
-        ["case_presented", "answer_submitted", "probe_answered", "feedback_given"].includes(e.type),
-      );
-      const session = db.prepare("SELECT * FROM sessions WHERE id = ?").get(sessionId);
-      const current = state?.plan?.[state.idx];
-      return json(res, 200, {
-        ended: !!session?.ended_at,
-        caseIndex: state?.idx ?? null,
-        caseCount: state?.plan?.length ?? null,
-        answered: state?.answered ?? null,
-        timeLimitSeconds: current?.timeLimitSeconds ?? null,
-        events: events.map((e) => ({ type: e.type, payload: e.payload })),
-      });
-    }
+    if (action === "transcript" && req.method === "GET") return json(res, 200, transcript(sessionId));
 
-    if (!state) return json(res, 404, { error: "session not found or already ended" });
-
-    if (action === "next" && req.method === "POST") {
-      if (!presentNextCase(state)) {
-        return json(res, 200, { finished: true });
-      }
-      return streamTutorTurn(res, sessionId, state, "case_presented");
-    }
+    if (action === "next" && req.method === "POST")
+      return streamTurn(res, (onDelta) => nextCase(sessionId, onDelta));
 
     if (action === "turn" && req.method === "POST") {
       const body = await readBody(req);
       const text = String(body.text || "").trim();
       if (!text) return json(res, 400, { error: "empty message" });
-      const current = state.plan[state.idx];
-      if (!current) return json(res, 400, { error: "no active case — call /next first" });
-
-      if (!state.answered) {
-        const latencyMs = Number(body.latency_ms) || null;
-        const late = latencyMs != null && latencyMs > current.timeLimitSeconds * 1000;
-        state.answered = true;
-        const attemptId = uuid();
-        db.prepare(
-          "INSERT INTO attempts (id, session_id, case_id, answer_text, latency_ms, hedged) VALUES (?, ?, ?, ?, ?, ?)",
-        ).run(attemptId, sessionId, current.caseId, text, latencyMs, 0);
-        appendEvent(sessionId, "answer_submitted", { case_id: current.caseId, text, latency_ms: latencyMs, late, attempt_id: attemptId });
-        state.messages.push({
-          role: "user",
-          content: text + (latencyMs ? `\n\n[response latency: ${(latencyMs / 1000).toFixed(1)}s${late ? " — OVER the time limit" : ""}]` : ""),
-        });
-      } else {
-        appendEvent(sessionId, "probe_answered", { case_id: current.caseId, text });
-        state.messages.push({ role: "user", content: text });
-      }
-      return streamTutorTurn(res, sessionId, state, "feedback_given");
+      return streamTurn(res, (onDelta) => userTurn(sessionId, text, Number(body.latency_ms) || null, onDelta));
     }
 
     if (action === "end" && req.method === "POST") {
-      db.prepare("UPDATE sessions SET ended_at = ? WHERE id = ?").run(now(), sessionId);
-      appendEvent(sessionId, "session_ended", {});
-      enqueueJob("classify_session", { sessionId });
-      live.delete(sessionId);
+      endSession(sessionId);
       return json(res, 200, { ok: true, queued: "classify_session" });
     }
   }
@@ -365,4 +238,5 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Clinical Reasoning Trainer running at http://localhost:${PORT}`);
   if (AUTH_KEY) console.log("auth: TRAINER_KEY required");
+  startTelegramBot();
 });
