@@ -14,6 +14,7 @@ import { db, now, seedCases, enqueueJob, claimJob, completeJob, failJob } from "
 import { createSession, nextCase, userTurn, endSession, transcript } from "./lib/engine.mjs";
 import { processSession } from "./lib/classify.mjs";
 import { startTelegramBot } from "./lib/telegram.mjs";
+import { transcribeAudio, transcriptionAvailable } from "./lib/transcribe.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.TRAINER_PORT || 8787);
@@ -123,6 +124,22 @@ async function handleApi(req, res, url) {
     if (action === "end" && req.method === "POST") {
       endSession(sessionId);
       return json(res, 200, { ok: true, queued: "classify_session" });
+    }
+  }
+
+  if (path === "/api/transcribe" && req.method === "POST") {
+    if (!transcriptionAvailable())
+      return json(res, 501, { error: "GEMINI_API_KEY not set — voice answers disabled" });
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const buffer = Buffer.concat(chunks);
+    if (buffer.length === 0) return json(res, 400, { error: "empty audio" });
+    if (buffer.length > 20 * 1024 * 1024) return json(res, 413, { error: "audio too large" });
+    try {
+      const text = await transcribeAudio(buffer, req.headers["content-type"] || "audio/webm");
+      return json(res, 200, { text });
+    } catch (e) {
+      return json(res, 502, { error: e.message });
     }
   }
 

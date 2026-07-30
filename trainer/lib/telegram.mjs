@@ -11,6 +11,7 @@
 
 import { db } from "./db.mjs";
 import { createSession, nextCase, userTurn, endSession } from "./engine.mjs";
+import { transcribeAudio, transcriptionAvailable } from "./transcribe.mjs";
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const ALLOWED_CHAT = process.env.TELEGRAM_CHAT_ID || "";
@@ -119,7 +120,11 @@ async function handleCommand(chatId, chat, text) {
   if (cmd === "/start" || cmd === "/help") {
     await send(
       chatId,
-      `Clinical Reasoning Trainer.\n\nA case arrives as raw clinical material with a time limit. Reply with ONE diagnosis and ONE immediate action — your response time is measured. The tutor probes misses; answer it. Then next case.\n\nCommands:\n/new — start a session\n/end — end the current session\n/brief — latest post-session brief\n/status — mastery + due summary\n/cards — unexported card count\n\n(chat id: ${chatId})`,
+      `Clinical Reasoning Trainer.\n\nA case arrives as raw clinical material with a time limit. Reply with ONE diagnosis and ONE immediate action — your response time is measured. The tutor probes misses; answer it. Then next case.\n\n${
+        transcriptionAvailable()
+          ? "🎤 You can answer by voice note — it is transcribed and judged like a spoken viva answer."
+          : "(Voice answers disabled — set GEMINI_API_KEY to enable.)"
+      }\n\nCommands:\n/new — start a session\n/end — end the current session\n/brief — latest post-session brief\n/status — mastery + due summary\n/cards — unexported card count\n\n(chat id: ${chatId})`,
       KB_START,
     );
     return;
@@ -169,7 +174,24 @@ async function handleCommand(chatId, chat, text) {
   await send(chatId, "Unknown command. /help");
 }
 
-async function handleMessage(chatId, text) {
+// Download a Telegram voice/audio file and transcribe it.
+// Returns the transcript, or null after messaging the user about the failure.
+async function transcribeTelegramAudio(chatId, fileId, mimeType) {
+  try {
+    await tg("sendChatAction", { chat_id: chatId, action: "typing" });
+    const file = await tg("getFile", { file_id: fileId });
+    const res = await fetch(`https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`);
+    if (!res.ok) throw new Error(`file download failed (${res.status})`);
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length > 20 * 1024 * 1024) throw new Error("voice note too large (>20MB)");
+    return await transcribeAudio(buffer, mimeType || "audio/ogg");
+  } catch (e) {
+    await send(chatId, `Couldn't transcribe that: ${e.message}`);
+    return null;
+  }
+}
+
+async function handleMessage(chatId, text, receivedAt = Date.now()) {
   let chat = chats.get(chatId);
 
   if (text.startsWith("/")) return handleCommand(chatId, chat, text);
@@ -180,7 +202,8 @@ async function handleMessage(chatId, text) {
   if (chat.busy) return send(chatId, "Hold on — the tutor is still responding.");
   chat.busy = true;
   try {
-    const latencyMs = chat.clockStart ? Date.now() - chat.clockStart : null;
+    // receivedAt (not now) so voice transcription time never counts as thinking time
+    const latencyMs = chat.clockStart ? receivedAt - chat.clockStart : null;
     chat.clockStart = null; // only the committed answer is timed
     const result = await streamToMessage(chatId, (onDelta) => userTurn(chat.sessionId, text, latencyMs, onDelta));
     if (latencyMs != null) {
@@ -257,7 +280,15 @@ export function startTelegramBot() {
           // handle sequentially per update; failures must not kill the poll loop
           try {
             if (msg?.text) await handleMessage(chatId, msg.text.trim());
-            else if (cb) await handleCallback(chatId, cb.data, cb.id);
+            else if (msg?.voice || msg?.audio) {
+              const receivedAt = Date.now(); // clock stops when the voice note arrives
+              const media = msg.voice || msg.audio;
+              const transcript = await transcribeTelegramAudio(chatId, media.file_id, media.mime_type);
+              if (transcript) {
+                await send(chatId, `🎤 "${transcript}"`);
+                await handleMessage(chatId, transcript, receivedAt);
+              }
+            } else if (cb) await handleCallback(chatId, cb.data, cb.id);
           } catch (e) {
             console.error("telegram update failed:", e);
           }

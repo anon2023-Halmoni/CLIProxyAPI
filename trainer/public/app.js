@@ -254,6 +254,78 @@ async function resumeSession() {
 
 // ---------------------------------------------------------------- wiring
 
+// ---------------------------------------------------------------- voice
+// Prefer the browser's built-in speech recognition (Chrome — no key
+// needed); fall back to MediaRecorder + server-side transcription.
+
+const voice = { active: false, rec: null, recorder: null, baseText: "" };
+
+function setMic(active) {
+  voice.active = active;
+  $("mic-btn").classList.toggle("recording", active);
+}
+
+function startDictation() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    const rec = new SR();
+    rec.lang = "en-AU";
+    rec.continuous = true;
+    rec.interimResults = true;
+    voice.baseText = $("input").value ? $("input").value + " " : "";
+    rec.onresult = (e) => {
+      let finalText = "", interim = "";
+      for (const r of e.results) (r.isFinal ? (finalText += r[0].transcript) : (interim += r[0].transcript));
+      $("input").value = voice.baseText + finalText + interim;
+    };
+    rec.onend = () => setMic(false);
+    rec.onerror = (e) => {
+      setMic(false);
+      if (e.error === "not-allowed") alert("Microphone permission denied.");
+    };
+    voice.rec = rec;
+    rec.start();
+    setMic(true);
+    return;
+  }
+  // fallback: record and transcribe server-side
+  navigator.mediaDevices
+    .getUserMedia({ audio: true })
+    .then((stream) => {
+      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/mp4";
+      const recorder = new MediaRecorder(stream, { mimeType: mime });
+      const chunks = [];
+      recorder.ondataavailable = (e) => chunks.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setMic(false);
+        const blob = new Blob(chunks, { type: mime });
+        $("input").placeholder = "Transcribing…";
+        const res = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: { ...headers(), "Content-Type": mime },
+          body: blob,
+        });
+        const data = await res.json();
+        $("input").placeholder = "One diagnosis. One immediate action.";
+        if (res.ok) $("input").value = ($("input").value ? $("input").value + " " : "") + data.text;
+        else alert(data.error || "transcription failed");
+      };
+      voice.recorder = recorder;
+      recorder.start();
+      setMic(true);
+    })
+    .catch(() => alert("Microphone unavailable."));
+}
+
+function stopDictation() {
+  if (voice.rec) voice.rec.stop(), (voice.rec = null);
+  if (voice.recorder?.state === "recording") voice.recorder.stop();
+  voice.recorder = null;
+}
+
+$("mic-btn").addEventListener("click", () => (voice.active ? stopDictation() : startDictation()));
+
 $("start-btn").addEventListener("click", startSession);
 $("send-btn").addEventListener("click", sendMessage);
 $("input").addEventListener("keydown", (e) => {

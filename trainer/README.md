@@ -49,6 +49,18 @@ while the server runs at home.
   e.g. a Cloudflare tunnel), the bot's menu button opens the full web app
   as a Telegram Mini App.
 
+## Voice answers
+
+- **Telegram**: send a voice note instead of typing — it is transcribed
+  (Google Gemini, `GEMINI_API_KEY` required, free tier is fine), echoed
+  back as 🎤 "…", and judged like any committed answer. The clock stops
+  when your voice note *arrives*, so transcription time never counts
+  against you.
+- **Web app**: the 🎤 button dictates straight into the answer box using
+  the browser's built-in speech recognition (Chrome — no key needed).
+  Browsers without it record audio and transcribe via the server
+  (needs `GEMINI_API_KEY`).
+
 ## Model split
 
 Benchmarked across all Z.ai models (2026-07-30): the tutor runs

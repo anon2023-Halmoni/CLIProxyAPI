@@ -84,3 +84,5 @@ td.miss-ANCHORING { color: #d98cf5; }
 }
 .composer textarea:focus { outline: 2px solid var(--accent); }
 .composer-buttons { display: flex; flex-direction: column; gap: 6px; justify-content: flex-end; }
+#mic-btn.recording { background: var(--danger); animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
