@@ -1,0 +1,29 @@
+name: network-egress-probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/network-egress-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: DNS and HTTPS probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'DNS:'
+          getent ahosts api.openai.com | head -n 5
+          echo 'HTTPS:'
+          code="$(curl -sS -o /tmp/openai-response.txt -w '%{http_code}' https://api.openai.com/v1/models || true)"
+          echo "api.openai.com returned HTTP ${code}"
+          if [ "${code}" = "000" ]; then
+            echo 'Network probe failed before HTTP response.'
+            exit 1
+          fi
+          echo 'Network egress is available on this runner.'
