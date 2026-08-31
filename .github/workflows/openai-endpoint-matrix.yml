@@ -1,0 +1,51 @@
+name: openai-endpoint-matrix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/openai-endpoint-matrix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  endpoint:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: platform-api
+            host: api.openai.com
+            url: https://api.openai.com/v1/models
+            expected: '401'
+          - name: chatgpt-admin-api
+            host: api.chatgpt.com
+            url: https://api.chatgpt.com/v1/
+            expected: '401,403,404'
+          - name: admin-console
+            host: admin.openai.com
+            url: https://admin.openai.com/
+            expected: '200,301,302,307,308,401,403'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe ${{ matrix.name }}
+        shell: bash
+        env:
+          HOST: ${{ matrix.host }}
+          URL: ${{ matrix.url }}
+          EXPECTED: ${{ matrix.expected }}
+        run: |
+          set -euo pipefail
+          echo "Target: ${HOST}"
+          getent ahosts "${HOST}" | head -n 6
+          code="$(curl -sS -L --max-redirs 3 --connect-timeout 10 --max-time 20 -o /dev/null -w '%{http_code}' "${URL}" || true)"
+          echo "HTTP ${code}"
+          if [ "${code}" = "000" ]; then
+            echo 'No HTTP response: DNS/TCP/TLS/egress failure.'
+            exit 1
+          fi
+          case ",${EXPECTED}," in
+            *,${code},*) echo 'Reachability OK.' ;;
+            *) echo "Reachable, but unexpected status ${code}; expected one of ${EXPECTED}."; exit 1 ;;
+          esac
