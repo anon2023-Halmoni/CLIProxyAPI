@@ -1,0 +1,46 @@
+name: openai-runtime-diagnostics
+
+on:
+  push:
+    paths:
+      - '.github/workflows/openai-runtime-diagnostics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Runtime inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          uname -a
+          echo "curl: $(curl --version | head -n 1)"
+          echo "openssl: $(openssl version)"
+          echo "python: $(python3 --version)"
+          echo "node: $(node --version)"
+          echo "git: $(git --version)"
+          echo 'Resolver:'
+          cat /etc/resolv.conf
+          echo 'Route:'
+          ip route
+
+      - name: TLS handshake to OpenAI
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 15 openssl s_client -connect api.openai.com:443 -servername api.openai.com </dev/null 2>/dev/null \
+            | openssl x509 -noout -subject -issuer -dates
+
+      - name: GitHub and OpenAI egress
+        shell: bash
+        run: |
+          set -euo pipefail
+          for url in https://github.com/ https://api.github.com/ https://api.openai.com/v1/models; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 10 --max-time 20 "$url" || true)"
+            echo "$url -> HTTP $code"
+            if [ "$code" = "000" ]; then exit 1; fi
+          done
