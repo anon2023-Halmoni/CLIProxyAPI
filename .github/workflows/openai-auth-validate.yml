@@ -31,13 +31,7 @@ jobs:
             echo 'Platform authentication failed.'
             exit 1
           fi
-          python3 - <<'PY'
-import json
-with open('/tmp/platform.json', 'r', encoding='utf-8') as f:
-    data=json.load(f)
-models=data.get('data', [])
-print('Platform authentication OK; models visible:', len(models))
-PY
+          python3 -c "import json; d=json.load(open('/tmp/platform.json', encoding='utf-8')); print('Platform authentication OK; models visible:', len(d.get('data', [])))"
 
   chatgpt-admin-key:
     runs-on: ubuntu-latest
